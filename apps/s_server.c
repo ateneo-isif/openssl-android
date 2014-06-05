@@ -872,13 +872,7 @@ int MAIN(int argc, char *argv[])
 	/* by default do not send a PSK identity hint */
 	static char *psk_identity_hint=NULL;
 #endif
-#if !defined(OPENSSL_NO_SSL2) && !defined(OPENSSL_NO_SSL3)
 	meth=SSLv23_server_method();
-#elif !defined(OPENSSL_NO_SSL3)
-	meth=SSLv3_server_method();
-#elif !defined(OPENSSL_NO_SSL2)
-	meth=SSLv2_server_method();
-#endif
 
 	local_argc=argc;
 	local_argv=argv;
@@ -1103,7 +1097,7 @@ int MAIN(int argc, char *argv[])
 			psk_key=*(++argv);
 			for (i=0; i<strlen(psk_key); i++)
 				{
-				if (isxdigit((int)psk_key[i]))
+				if (isxdigit((unsigned char)psk_key[i]))
 					continue;
 				BIO_printf(bio_err,"Not a hex number '%s'\n",*argv);
 				goto bad;
@@ -2254,11 +2248,10 @@ static int www_body(char *hostname, int s, unsigned char *context)
 	{
 	char *buf=NULL;
 	int ret=1;
-	int i,j,k,blank,dot;
+	int i,j,k,dot;
 	SSL *con;
 	const SSL_CIPHER *c;
 	BIO *io,*ssl_bio,*sbio;
-	long total_bytes;
 
 	buf=OPENSSL_malloc(bufsize);
 	if (buf == NULL) return(0);
@@ -2329,7 +2322,6 @@ static int www_body(char *hostname, int s, unsigned char *context)
 		SSL_set_msg_callback_arg(con, bio_s_out);
 		}
 
-	blank=0;
 	for (;;)
 		{
 		if (hack)
@@ -2559,7 +2551,6 @@ static int www_body(char *hostname, int s, unsigned char *context)
                                         BIO_puts(io,"HTTP/1.0 200 ok\r\nContent-type: text/plain\r\n\r\n");
                                 }
 			/* send the file */
-			total_bytes=0;
 			for (;;)
 				{
 				i=BIO_read(file,buf,bufsize);

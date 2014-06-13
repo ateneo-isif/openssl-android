@@ -351,6 +351,8 @@ common_src_files := \
   crypto/hmac/hm_ameth.c \
   crypto/hmac/hm_pmeth.c \
   crypto/hmac/hmac.c \
+  crypto/jpake/jpake.c \
+  crypto/jpake/jpake_err.c \
   crypto/krb5/krb5_asn.c \
   crypto/lhash/lh_stats.c \
   crypto/lhash/lhash.c \

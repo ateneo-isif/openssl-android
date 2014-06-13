@@ -579,8 +579,6 @@ void SSL_free(SSL *s)
 		sk_OCSP_RESPID_pop_free(s->tlsext_ocsp_ids, OCSP_RESPID_free);
 	if (s->tlsext_ocsp_resp)
 		OPENSSL_free(s->tlsext_ocsp_resp);
-	if (s->tlsext_channel_id_private)
-		EVP_PKEY_free(s->tlsext_channel_id_private);
 #endif
 
 	if (s->client_CA != NULL)
@@ -1378,6 +1376,10 @@ char *SSL_get_shared_ciphers(const SSL *s,char *buf,int len)
 
 	p=buf;
 	sk=s->session->ciphers;
+
+	if (sk_SSL_CIPHER_num(sk) == 0)
+		return NULL;
+
 	for (i=0; i<sk_SSL_CIPHER_num(sk); i++)
 		{
 		int n;
@@ -1826,7 +1828,9 @@ SSL_CTX *SSL_CTX_new(const SSL_METHOD *meth)
 	CRYPTO_new_ex_data(CRYPTO_EX_INDEX_SSL_CTX, ret, &ret->ex_data);
 
 	ret->extra_certs=NULL;
-	ret->comp_methods=SSL_COMP_get_compression_methods();
+	/* No compression for DTLS */
+	if (meth->version != DTLS1_VERSION)
+		ret->comp_methods=SSL_COMP_get_compression_methods();
 
 	ret->max_send_fragment = SSL3_RT_MAX_PLAIN_LENGTH;
 
@@ -2005,11 +2009,6 @@ void SSL_CTX_free(SSL_CTX *a)
 		ssl_buf_freelist_free(a->wbuf_freelist);
 	if (a->rbuf_freelist)
 		ssl_buf_freelist_free(a->rbuf_freelist);
-#endif
-
-#ifndef OPENSSL_NO_TLSEXT
-	if (a->tlsext_channel_id_private)
-		EVP_PKEY_free(a->tlsext_channel_id_private);
 #endif
 
 	OPENSSL_free(a);
@@ -2849,9 +2848,7 @@ void ssl_clear_cipher_ctx(SSL *s)
 /* Fix this function so that it takes an optional type parameter */
 X509 *SSL_get_certificate(const SSL *s)
 	{
-	if (s->server)
-		return(ssl_get_server_send_cert(s));
-	else if (s->cert != NULL)
+	if (s->cert != NULL)
 		return(s->cert->key->x509);
 	else
 		return(NULL);
@@ -3280,19 +3277,6 @@ void SSL_CTX_set_msg_callback(SSL_CTX *ctx, void (*cb)(int write_p, int version,
 void SSL_set_msg_callback(SSL *ssl, void (*cb)(int write_p, int version, int content_type, const void *buf, size_t len, SSL *ssl, void *arg))
 	{
 	SSL_callback_ctrl(ssl, SSL_CTRL_SET_MSG_CALLBACK, (void (*)(void))cb);
-	}
-
-int SSL_cutthrough_complete(const SSL *s)
-	{
-	return (!s->server &&                 /* cutthrough only applies to clients */
-		!s->hit &&                        /* full-handshake */
-		s->version >= SSL3_VERSION &&
-		s->s3->in_read_app_data == 0 &&   /* cutthrough only applies to write() */
-		(SSL_get_mode((SSL*)s) & SSL_MODE_HANDSHAKE_CUTTHROUGH) &&  /* cutthrough enabled */
-		SSL_get_cipher_bits(s, NULL) >= 128 &&                      /* strong cipher choosen */
-		s->s3->previous_server_finished_len == 0 &&                 /* not a renegotiation handshake */
-		(s->state == SSL3_ST_CR_SESSION_TICKET_A ||                 /* ready to write app-data*/
-			s->state == SSL3_ST_CR_FINISHED_A));
 	}
 
 /* Allocates new EVP_MD_CTX and sets pointer to it into given pointer

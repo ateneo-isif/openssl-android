@@ -157,11 +157,8 @@
 #include <openssl/buffer.h>
 #include <openssl/rand.h>
 #include <openssl/objects.h>
-#include <openssl/ec.h>
-#include <openssl/ecdsa.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
-#include <openssl/sha.h>
 #include <openssl/x509.h>
 #ifndef OPENSSL_NO_DH
 #include <openssl/dh.h>
@@ -612,8 +609,15 @@ int ssl3_accept(SSL *s)
 				 * the client uses its key from the certificate
 				 * for key exchange.
 				 */
+#if defined(OPENSSL_NO_TLSEXT) || defined(OPENSSL_NO_NEXTPROTONEG)
+				s->state=SSL3_ST_SR_FINISHED_A;
+#else
+				if (s->s3->next_proto_neg_seen)
+					s->state=SSL3_ST_SR_NEXT_PROTO_A;
+				else
+					s->state=SSL3_ST_SR_FINISHED_A;
+#endif
 				s->init_num = 0;
-				s->state=SSL3_ST_SR_POST_CLIENT_CERT;
 				}
 			else if (TLS1_get_version(s) >= TLS1_2_VERSION)
 				{
@@ -669,50 +673,26 @@ int ssl3_accept(SSL *s)
 		case SSL3_ST_SR_CERT_VRFY_A:
 		case SSL3_ST_SR_CERT_VRFY_B:
 
+			s->s3->flags |= SSL3_FLAGS_CCS_OK;
 			/* we should decide if we expected this one */
 			ret=ssl3_get_cert_verify(s);
 			if (ret <= 0) goto end;
 
-			s->state=SSL3_ST_SR_POST_CLIENT_CERT;
-			s->init_num=0;
-			break;
-
-		case SSL3_ST_SR_POST_CLIENT_CERT: {
-			char next_proto_neg = 0;
-			char channel_id = 0;
-#if !defined(OPENSSL_NO_TLSEXT)
-# if !defined(OPENSSL_NO_NEXTPROTONEG)
-			next_proto_neg = s->s3->next_proto_neg_seen;
-# endif
-			channel_id = s->s3->tlsext_channel_id_valid;
-#endif
-
-			if (next_proto_neg)
+#if defined(OPENSSL_NO_TLSEXT) || defined(OPENSSL_NO_NEXTPROTONEG)
+			s->state=SSL3_ST_SR_FINISHED_A;
+#else
+			if (s->s3->next_proto_neg_seen)
 				s->state=SSL3_ST_SR_NEXT_PROTO_A;
-			else if (channel_id)
-				s->state=SSL3_ST_SR_CHANNEL_ID_A;
 			else
 				s->state=SSL3_ST_SR_FINISHED_A;
+#endif
+			s->init_num=0;
 			break;
-		}
 
 #if !defined(OPENSSL_NO_TLSEXT) && !defined(OPENSSL_NO_NEXTPROTONEG)
 		case SSL3_ST_SR_NEXT_PROTO_A:
 		case SSL3_ST_SR_NEXT_PROTO_B:
 			ret=ssl3_get_next_proto(s);
-			if (ret <= 0) goto end;
-			s->init_num = 0;
-			if (s->s3->tlsext_channel_id_valid)
-				s->state=SSL3_ST_SR_CHANNEL_ID_A;
-			else
-				s->state=SSL3_ST_SR_FINISHED_A;
-			break;
-#endif
-
-#if !defined(OPENSSL_NO_TLSEXT)
-		case SSL3_ST_SR_CHANNEL_ID_A:
-		case SSL3_ST_SR_CHANNEL_ID_B:
-			ret=ssl3_get_channel_id(s);
 			if (ret <= 0) goto end;
 			s->init_num = 0;
 			s->state=SSL3_ST_SR_FINISHED_A;
@@ -721,6 +701,7 @@ int ssl3_accept(SSL *s)
 
 		case SSL3_ST_SR_FINISHED_A:
 		case SSL3_ST_SR_FINISHED_B:
+			s->s3->flags |= SSL3_FLAGS_CCS_OK;
 			ret=ssl3_get_finished(s,SSL3_ST_SR_FINISHED_A,
 				SSL3_ST_SR_FINISHED_B);
 			if (ret <= 0) goto end;
@@ -786,7 +767,19 @@ int ssl3_accept(SSL *s)
 			if (ret <= 0) goto end;
 			s->state=SSL3_ST_SW_FLUSH;
 			if (s->hit)
-				s->s3->tmp.next_state=SSL3_ST_SR_POST_CLIENT_CERT;
+				{
+#if defined(OPENSSL_NO_TLSEXT) || defined(OPENSSL_NO_NEXTPROTONEG)
+				s->s3->tmp.next_state=SSL3_ST_SR_FINISHED_A;
+#else
+				if (s->s3->next_proto_neg_seen)
+					{
+					s->s3->flags |= SSL3_FLAGS_CCS_OK;
+					s->s3->tmp.next_state=SSL3_ST_SR_NEXT_PROTO_A;
+					}
+				else
+					s->s3->tmp.next_state=SSL3_ST_SR_FINISHED_A;
+#endif
+				}
 			else
 				s->s3->tmp.next_state=SSL_ST_OK;
 			s->init_num=0;
@@ -970,7 +963,8 @@ int ssl3_get_client_hello(SSL *s)
 	    (s->version != DTLS1_VERSION && s->client_version < s->version))
 		{
 		SSLerr(SSL_F_SSL3_GET_CLIENT_HELLO, SSL_R_WRONG_VERSION_NUMBER);
-		if ((s->client_version>>8) == SSL3_VERSION_MAJOR)
+		if ((s->client_version>>8) == SSL3_VERSION_MAJOR && 
+			!s->enc_write_ctx && !s->write_hash)
 			{
 			/* similar to ssl3_get_record, send alert using remote version number */
 			s->version = s->client_version;
@@ -1217,12 +1211,9 @@ int ssl3_get_client_hello(SSL *s)
 	 * server_random before calling tls_session_secret_cb in order to allow
 	 * SessionTicket processing to use it in key derivation. */
 	{
-		unsigned long Time;
 		unsigned char *pos;
-		Time=(unsigned long)time(NULL);			/* Time */
 		pos=s->s3->server_random;
-		l2n(Time,pos);
-		if (RAND_pseudo_bytes(pos,SSL3_RANDOM_SIZE-4) <= 0)
+		if (ssl_fill_hello_random(s, 1, pos, SSL3_RANDOM_SIZE) <= 0)
 			{
 			al=SSL_AD_INTERNAL_ERROR;
 			goto f_err;
@@ -1459,19 +1450,13 @@ int ssl3_send_server_hello(SSL *s)
 	unsigned char *p,*d;
 	int i,sl;
 	unsigned long l;
-#ifdef OPENSSL_NO_TLSEXT
-	unsigned long Time;
-#endif
 
 	if (s->state == SSL3_ST_SW_SRVR_HELLO_A)
 		{
 		buf=(unsigned char *)s->init_buf->data;
 #ifdef OPENSSL_NO_TLSEXT
 		p=s->s3->server_random;
-		/* Generate server_random if it was not needed previously */
-		Time=(unsigned long)time(NULL);			/* Time */
-		l2n(Time,p);
-		if (RAND_pseudo_bytes(p,SSL3_RANDOM_SIZE-4) <= 0)
+		if (ssl_fill_hello_random(s, 1, p, SSL3_RANDOM_SIZE) <= 0)
 			return -1;
 #endif
 		/* Do the message type and length last */
@@ -1862,7 +1847,7 @@ int ssl3_send_server_key_exchange(SSL *s)
 			SSLerr(SSL_F_SSL3_SEND_SERVER_KEY_EXCHANGE,SSL_R_UNKNOWN_KEY_EXCHANGE_TYPE);
 			goto f_err;
 			}
-		for (i=0; r[i] != NULL && i<4; i++)
+		for (i=0; i < 4 && r[i] != NULL; i++)
 			{
 			nr[i]=BN_num_bytes(r[i]);
 #ifndef OPENSSL_NO_SRP
@@ -1898,7 +1883,7 @@ int ssl3_send_server_key_exchange(SSL *s)
 		d=(unsigned char *)s->init_buf->data;
 		p= &(d[4]);
 
-		for (i=0; r[i] != NULL && i<4; i++)
+		for (i=0; i < 4 && r[i] != NULL; i++)
 			{
 #ifndef OPENSSL_NO_SRP
 			if ((i == 2) && (type & SSL_kSRP))
@@ -2129,6 +2114,11 @@ int ssl3_send_certificate_request(SSL *s)
 		s->init_num=n+4;
 		s->init_off=0;
 #ifdef NETSCAPE_HANG_BUG
+		if (!BUF_MEM_grow_clean(buf, s->init_num + 4))
+			{
+			SSLerr(SSL_F_SSL3_SEND_CERTIFICATE_REQUEST,ERR_R_BUF_LIB);
+			goto err;
+			}
 		p=(unsigned char *)s->init_buf->data + s->init_num;
 
 		/* do the header */
@@ -2845,6 +2835,8 @@ int ssl3_get_client_key_exchange(SSL *s)
 			unsigned char premaster_secret[32], *start;
 			size_t outlen=32, inlen;
 			unsigned long alg_a;
+			int Ttag, Tclass;
+			long Tlen;
 
 			/* Get our certificate private key*/
 			alg_a = s->s3->tmp.new_cipher->algorithm_auth;
@@ -2866,26 +2858,15 @@ int ssl3_get_client_key_exchange(SSL *s)
 					ERR_clear_error();
 				}
 			/* Decrypt session key */
-			if ((*p!=( V_ASN1_SEQUENCE| V_ASN1_CONSTRUCTED))) 
+			if (ASN1_get_object((const unsigned char **)&p, &Tlen, &Ttag, &Tclass, n) != V_ASN1_CONSTRUCTED || 
+				Ttag != V_ASN1_SEQUENCE ||
+			 	Tclass != V_ASN1_UNIVERSAL) 
 				{
 				SSLerr(SSL_F_SSL3_GET_CLIENT_KEY_EXCHANGE,SSL_R_DECRYPTION_FAILED);
 				goto gerr;
 				}
-			if (p[1] == 0x81)
-				{
-				start = p+3;
-				inlen = p[2];
-				}
-			else if (p[1] < 0x80)
-				{
-				start = p+2;
-				inlen = p[1];
-				}
-			else
-				{
-				SSLerr(SSL_F_SSL3_GET_CLIENT_KEY_EXCHANGE,SSL_R_DECRYPTION_FAILED);
-				goto gerr;
-				}
+			start = p;
+			inlen = Tlen;
 			if (EVP_PKEY_decrypt(pkey_ctx,premaster_secret,&outlen,start,inlen) <=0) 
 
 				{
@@ -3622,140 +3603,4 @@ int ssl3_get_next_proto(SSL *s)
 	return 1;
 	}
 # endif
-
-/* ssl3_get_channel_id reads and verifies a ClientID handshake message. */
-int ssl3_get_channel_id(SSL *s)
-	{
-	int ret = -1, ok;
-	long n;
-	const unsigned char *p;
-	unsigned short extension_type, extension_len;
-	EC_GROUP* p256 = NULL;
-	EC_KEY* key = NULL;
-	EC_POINT* point = NULL;
-	ECDSA_SIG sig;
-	BIGNUM x, y;
-
-	if (s->state == SSL3_ST_SR_CHANNEL_ID_A && s->init_num == 0)
-		{
-		/* The first time that we're called we take the current
-		 * handshake hash and store it. */
-		EVP_MD_CTX md_ctx;
-		unsigned int len;
-
-		EVP_MD_CTX_init(&md_ctx);
-		EVP_DigestInit_ex(&md_ctx, EVP_sha256(), NULL);
-		if (!tls1_channel_id_hash(&md_ctx, s))
-			return -1;
-		len = sizeof(s->s3->tlsext_channel_id);
-		EVP_DigestFinal(&md_ctx, s->s3->tlsext_channel_id, &len);
-		EVP_MD_CTX_cleanup(&md_ctx);
-		}
-
-	n = s->method->ssl_get_message(s,
-		SSL3_ST_SR_CHANNEL_ID_A,
-		SSL3_ST_SR_CHANNEL_ID_B,
-		SSL3_MT_ENCRYPTED_EXTENSIONS,
-		2 + 2 + TLSEXT_CHANNEL_ID_SIZE,
-		&ok);
-
-	if (!ok)
-		return((int)n);
-
-	ssl3_finish_mac(s, (unsigned char*)s->init_buf->data, s->init_num + 4);
-
-	/* s->state doesn't reflect whether ChangeCipherSpec has been received
-	 * in this handshake, but s->s3->change_cipher_spec does (will be reset
-	 * by ssl3_get_finished). */
-	if (!s->s3->change_cipher_spec)
-		{
-		SSLerr(SSL_F_SSL3_GET_CHANNEL_ID,SSL_R_GOT_CHANNEL_ID_BEFORE_A_CCS);
-		return -1;
-		}
-
-	if (n != 2 + 2 + TLSEXT_CHANNEL_ID_SIZE)
-		{
-		SSLerr(SSL_F_SSL3_GET_CHANNEL_ID,SSL_R_INVALID_MESSAGE);
-		return -1;
-		}
-
-	p = (unsigned char *)s->init_msg;
-
-	/* The payload looks like:
-	 *   uint16 extension_type
-	 *   uint16 extension_len;
-	 *   uint8 x[32];
-	 *   uint8 y[32];
-	 *   uint8 r[32];
-	 *   uint8 s[32];
-	 */
-	n2s(p, extension_type);
-	n2s(p, extension_len);
-
-	if (extension_type != TLSEXT_TYPE_channel_id ||
-	    extension_len != TLSEXT_CHANNEL_ID_SIZE)
-		{
-		SSLerr(SSL_F_SSL3_GET_CHANNEL_ID,SSL_R_INVALID_MESSAGE);
-		return -1;
-		}
-
-	p256 = EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1);
-	if (!p256)
-		{
-		SSLerr(SSL_F_SSL3_GET_CHANNEL_ID,SSL_R_NO_P256_SUPPORT);
-		return -1;
-		}
-
-	BN_init(&x);
-	BN_init(&y);
-	sig.r = BN_new();
-	sig.s = BN_new();
-
-	if (BN_bin2bn(p +  0, 32, &x) == NULL ||
-	    BN_bin2bn(p + 32, 32, &y) == NULL ||
-	    BN_bin2bn(p + 64, 32, sig.r) == NULL ||
-	    BN_bin2bn(p + 96, 32, sig.s) == NULL)
-		goto err;
-
-	point = EC_POINT_new(p256);
-	if (!point ||
-	    !EC_POINT_set_affine_coordinates_GFp(p256, point, &x, &y, NULL))
-		goto err;
-
-	key = EC_KEY_new();
-	if (!key ||
-	    !EC_KEY_set_group(key, p256) ||
-	    !EC_KEY_set_public_key(key, point))
-		goto err;
-
-	/* We stored the handshake hash in |tlsext_channel_id| the first time
-	 * that we were called. */
-	switch (ECDSA_do_verify(s->s3->tlsext_channel_id, SHA256_DIGEST_LENGTH, &sig, key)) {
-	case 1:
-		break;
-	case 0:
-		SSLerr(SSL_F_SSL3_GET_CHANNEL_ID,SSL_R_CHANNEL_ID_SIGNATURE_INVALID);
-		s->s3->tlsext_channel_id_valid = 0;
-		goto err;
-	default:
-		s->s3->tlsext_channel_id_valid = 0;
-		goto err;
-	}
-
-	memcpy(s->s3->tlsext_channel_id, p, 64);
-	ret = 1;
-
-err:
-	BN_free(&x);
-	BN_free(&y);
-	BN_free(sig.r);
-	BN_free(sig.s);
-	if (key)
-		EC_KEY_free(key);
-	if (point)
-		EC_POINT_free(point);
-	if (p256)
-		EC_GROUP_free(p256);
-	return ret;
-	}
 #endif

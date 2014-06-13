@@ -230,6 +230,12 @@ extern "C" {
 /* ExtensionType value from RFC5620 */
 #define TLSEXT_TYPE_heartbeat	15
 
+/* ExtensionType value for TLS padding extension.
+ * http://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml
+ * http://tools.ietf.org/html/draft-agl-tls-padding-03
+ */
+#define TLSEXT_TYPE_padding	21
+
 /* ExtensionType value from RFC4507 */
 #define TLSEXT_TYPE_session_ticket		35
 
@@ -247,9 +253,6 @@ extern "C" {
 /* This is not an IANA defined extension number */
 #define TLSEXT_TYPE_next_proto_neg		13172
 #endif
-
-/* This is not an IANA defined extension number */
-#define TLSEXT_TYPE_channel_id			30031
 
 /* NameType value from RFC 3546 */
 #define TLSEXT_NAMETYPE_host_name 0

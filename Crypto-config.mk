@@ -1,6 +1,6 @@
 # Auto-generated - DO NOT EDIT!
 # To regenerate, edit openssl.config, then run:
-#     ./import_openssl.sh import /path/to/openssl-1.0.1e.tar.gz
+#     ./import_openssl.sh import /path/to/openssl-1.0.1h.tar.gz
 #
 # Before including this file, the local Android.mk must define the following
 # variables:
@@ -457,7 +457,6 @@ common_src_files := \
   crypto/rsa/rsa_sign.c \
   crypto/rsa/rsa_ssl.c \
   crypto/rsa/rsa_x931.c \
-  crypto/rsa/rsa_depr.c \
   crypto/sha/sha1_one.c \
   crypto/sha/sha1dgst.c \
   crypto/sha/sha256.c \
@@ -534,13 +533,13 @@ common_src_files := \
   crypto/x509v3/v3err.c \
 
 common_c_includes := \
-  $(LOCAL_PATH)/ \
-  $(LOCAL_PATH)/crypto \
-  $(LOCAL_PATH)/crypto/asn1 \
-  $(LOCAL_PATH)/crypto/evp \
-  $(LOCAL_PATH)/crypto/modes \
-  $(LOCAL_PATH)/include \
-  $(LOCAL_PATH)/include/openssl \
+  . \
+  crypto \
+  crypto/asn1 \
+  crypto/evp \
+  crypto/modes \
+  include \
+  include/openssl \
 
 arm_c_flags := \
   -DAES_ASM \
@@ -668,7 +667,7 @@ target_arch := unknown_arch
 endif
 
 target_c_flags    := $(common_c_flags) $($(target_arch)_c_flags) $(local_c_flags)
-target_c_includes := $(common_c_includes) $(local_c_includes)
+target_c_includes := $(addprefix external/openssl/,$(common_c_includes)) $(local_c_includes)
 target_src_files  := $(common_src_files) $($(target_arch)_src_files)
 target_src_files  := $(filter-out $($(target_arch)_exclude_files), $(target_src_files))
 
@@ -679,7 +678,7 @@ host_arch := unknown_arch
 endif
 
 host_c_flags    := $(common_c_flags) $($(host_arch)_c_flags) $(local_c_flags)
-host_c_includes := $(common_c_includes) $(local_c_includes)
+host_c_includes := $(addprefix external/openssl/,$(common_c_includes)) $(local_c_includes)
 host_src_files  := $(common_src_files) $($(host_arch)_src_files)
 host_src_files  := $(filter-out $($(host_arch)_exclude_files), $(host_src_files))
 

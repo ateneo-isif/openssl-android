@@ -215,24 +215,6 @@ int ssl3_connect(SSL *s)
 		}
 #endif
 
-// BEGIN android-added
-#if 0
-/* Send app data in separate packet, otherwise, some particular site
- * (only one site so far) closes the socket. http://b/2511073
- * Note: there is a very small chance that two TCP packets
- * could be arriving at server combined into a single TCP packet,
- * then trigger that site to break. We haven't encounter that though.
- */
-// END android-added
-	if (SSL_get_mode(s) & SSL_MODE_HANDSHAKE_CUTTHROUGH)
-		{
-		/* Send app data along with CCS/Finished */
-		s->s3->flags |= SSL3_FLAGS_DELAY_CLIENT_FINISHED;
-		}
-
-// BEGIN android-added
-#endif
-// END android-added
 	for (;;)
 		{
 		state=s->state;
@@ -477,14 +459,13 @@ int ssl3_connect(SSL *s)
 				SSL3_ST_CW_CHANGE_A,SSL3_ST_CW_CHANGE_B);
 			if (ret <= 0) goto end;
 
+#if defined(OPENSSL_NO_TLSEXT) || defined(OPENSSL_NO_NEXTPROTONEG)
 			s->state=SSL3_ST_CW_FINISHED_A;
-#if !defined(OPENSSL_NO_TLSEXT)
-			if (s->s3->tlsext_channel_id_valid)
-				s->state=SSL3_ST_CW_CHANNEL_ID_A;
-# if !defined(OPENSSL_NO_NEXTPROTONEG)
+#else
 			if (s->s3->next_proto_neg_seen)
 				s->state=SSL3_ST_CW_NEXT_PROTO_A;
-# endif
+			else
+				s->state=SSL3_ST_CW_FINISHED_A;
 #endif
 			s->init_num=0;
 
@@ -518,18 +499,6 @@ int ssl3_connect(SSL *s)
 		case SSL3_ST_CW_NEXT_PROTO_B:
 			ret=ssl3_send_next_proto(s);
 			if (ret <= 0) goto end;
-			if (s->s3->tlsext_channel_id_valid)
-				s->state=SSL3_ST_CW_CHANNEL_ID_A;
-			else
-				s->state=SSL3_ST_CW_FINISHED_A;
-			break;
-#endif
-
-#if !defined(OPENSSL_NO_TLSEXT)
-		case SSL3_ST_CW_CHANNEL_ID_A:
-		case SSL3_ST_CW_CHANNEL_ID_B:
-			ret=ssl3_send_channel_id(s);
-			if (ret <= 0) goto end;
 			s->state=SSL3_ST_CW_FINISHED_A;
 			break;
 #endif
@@ -557,31 +526,14 @@ int ssl3_connect(SSL *s)
 				}
 			else
 				{
-				if ((SSL_get_mode(s) & SSL_MODE_HANDSHAKE_CUTTHROUGH) && SSL_get_cipher_bits(s, NULL) >= 128
-				    && s->s3->previous_server_finished_len == 0 /* no cutthrough on renegotiation (would complicate the state machine) */
-				   )
-					{
-					if (s->s3->flags & SSL3_FLAGS_DELAY_CLIENT_FINISHED)
-						{
-						s->state=SSL3_ST_CUTTHROUGH_COMPLETE;
-						s->s3->flags|=SSL3_FLAGS_POP_BUFFER;
-						s->s3->delay_buf_pop_ret=0;
-						}
-					else
-						{
-						s->s3->tmp.next_state=SSL3_ST_CUTTHROUGH_COMPLETE;
-						}
-					}
-				else
-					{
 #ifndef OPENSSL_NO_TLSEXT
-					/* Allow NewSessionTicket if ticket expected */
-					if (s->tlsext_ticket_expected)
-						s->s3->tmp.next_state=SSL3_ST_CR_SESSION_TICKET_A;
-					else
+				/* Allow NewSessionTicket if ticket expected */
+				if (s->tlsext_ticket_expected)
+					s->s3->tmp.next_state=SSL3_ST_CR_SESSION_TICKET_A;
+				else
 #endif
-						s->s3->tmp.next_state=SSL3_ST_CR_FINISHED_A;
-					}
+				
+				s->s3->tmp.next_state=SSL3_ST_CR_FINISHED_A;
 				}
 			s->init_num=0;
 			break;
@@ -607,6 +559,7 @@ int ssl3_connect(SSL *s)
 		case SSL3_ST_CR_FINISHED_A:
 		case SSL3_ST_CR_FINISHED_B:
 
+			s->s3->flags |= SSL3_FLAGS_CCS_OK;
 			ret=ssl3_get_finished(s,SSL3_ST_CR_FINISHED_A,
 				SSL3_ST_CR_FINISHED_B);
 			if (ret <= 0) goto end;
@@ -628,24 +581,6 @@ int ssl3_connect(SSL *s)
 			s->rwstate=SSL_NOTHING;
 			s->state=s->s3->tmp.next_state;
 			break;
-
-		case SSL3_ST_CUTTHROUGH_COMPLETE:
-#ifndef OPENSSL_NO_TLSEXT
-			/* Allow NewSessionTicket if ticket expected */
-			if (s->tlsext_ticket_expected)
-				s->state=SSL3_ST_CR_SESSION_TICKET_A;
-			else
-#endif
-				s->state=SSL3_ST_CR_FINISHED_A;
-
-			/* SSL_write() will take care of flushing buffered data if
-			 * DELAY_CLIENT_FINISHED is set.
-			 */
-			if (!(s->s3->flags & SSL3_FLAGS_DELAY_CLIENT_FINISHED))
-				ssl_free_wbio_buffer(s);
-			ret = 1;
-			goto end;
-			/* break; */
 
 		case SSL_ST_OK:
 			/* clean a few things up */
@@ -721,7 +656,7 @@ int ssl3_client_hello(SSL *s)
 	unsigned char *buf;
 	unsigned char *p,*d;
 	int i;
-	unsigned long Time,l;
+	unsigned long l;
 #ifndef OPENSSL_NO_COMP
 	int j;
 	SSL_COMP *comp;
@@ -752,9 +687,8 @@ int ssl3_client_hello(SSL *s)
 		/* else use the pre-loaded session */
 
 		p=s->s3->client_random;
-		Time=(unsigned long)time(NULL);			/* Time */
-		l2n(Time,p);
-		if (RAND_pseudo_bytes(p,SSL3_RANDOM_SIZE-4) <= 0)
+
+		if (ssl_fill_hello_random(s, 0, p, SSL3_RANDOM_SIZE) <= 0)
 			goto err;
 
 		/* Do the message type and length last */
@@ -988,6 +922,7 @@ int ssl3_get_server_hello(SSL *s)
 		SSLerr(SSL_F_SSL3_GET_SERVER_HELLO,SSL_R_ATTEMPT_TO_REUSE_SESSION_IN_DIFFERENT_CONTEXT);
 		goto f_err;
 		}
+	    s->s3->flags |= SSL3_FLAGS_CCS_OK;
 	    s->hit=1;
 	    }
 	else	/* a miss or crap from the other end */
@@ -2589,6 +2524,13 @@ int ssl3_send_client_key_exchange(SSL *s)
 			int ecdh_clnt_cert = 0;
 			int field_size = 0;
 
+			if (s->session->sess_cert == NULL) 
+				{
+				ssl3_send_alert(s,SSL3_AL_FATAL,SSL_AD_UNEXPECTED_MESSAGE);
+				SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,SSL_R_UNEXPECTED_MESSAGE);
+				goto err;
+				}
+
 			/* Did we send out the client's
 			 * ECDH share for use in premaster
 			 * computation as part of client certificate?
@@ -3375,8 +3317,7 @@ err:
 	return(0);
 	}
 
-#if !defined(OPENSSL_NO_TLSEXT)
-# if !defined(OPENSSL_NO_NEXTPROTONEG)
+#if !defined(OPENSSL_NO_TLSEXT) && !defined(OPENSSL_NO_NEXTPROTONEG)
 int ssl3_send_next_proto(SSL *s)
 	{
 	unsigned int len, padding_len;
@@ -3400,116 +3341,7 @@ int ssl3_send_next_proto(SSL *s)
 
 	return ssl3_do_write(s, SSL3_RT_HANDSHAKE);
 }
-# endif  /* !OPENSSL_NO_NEXTPROTONEG */
-
-int ssl3_send_channel_id(SSL *s)
-	{
-	unsigned char *d;
-	int ret = -1, public_key_len;
-	EVP_MD_CTX md_ctx;
-	size_t sig_len;
-	ECDSA_SIG *sig = NULL;
-	unsigned char *public_key = NULL, *derp, *der_sig = NULL;
-
-	if (s->state != SSL3_ST_CW_CHANNEL_ID_A)
-		return ssl3_do_write(s, SSL3_RT_HANDSHAKE);
-
-	d = (unsigned char *)s->init_buf->data;
-	*(d++)=SSL3_MT_ENCRYPTED_EXTENSIONS;
-	l2n3(2 + 2 + TLSEXT_CHANNEL_ID_SIZE, d);
-	s2n(TLSEXT_TYPE_channel_id, d);
-	s2n(TLSEXT_CHANNEL_ID_SIZE, d);
-
-	EVP_MD_CTX_init(&md_ctx);
-
-	public_key_len = i2d_PublicKey(s->tlsext_channel_id_private, NULL);
-	if (public_key_len <= 0)
-		{
-		SSLerr(SSL_F_SSL3_SEND_CHANNEL_ID,SSL_R_CANNOT_SERIALIZE_PUBLIC_KEY);
-		goto err;
-		}
-	// i2d_PublicKey will produce an ANSI X9.62 public key which, for a
-	// P-256 key, is 0x04 (meaning uncompressed) followed by the x and y
-	// field elements as 32-byte, big-endian numbers.
-	if (public_key_len != 65)
-		{
-		SSLerr(SSL_F_SSL3_SEND_CHANNEL_ID,SSL_R_CHANNEL_ID_NOT_P256);
-		goto err;
-		}
-	public_key = OPENSSL_malloc(public_key_len);
-	if (!public_key)
-		{
-		SSLerr(SSL_F_SSL3_SEND_CHANNEL_ID,ERR_R_MALLOC_FAILURE);
-		goto err;
-		}
-
-	derp = public_key;
-	i2d_PublicKey(s->tlsext_channel_id_private, &derp);
-
-	if (EVP_DigestSignInit(&md_ctx, NULL, EVP_sha256(), NULL,
-			       s->tlsext_channel_id_private) != 1)
-		{
-		SSLerr(SSL_F_SSL3_SEND_CHANNEL_ID,SSL_R_EVP_DIGESTSIGNINIT_FAILED);
-		goto err;
-		}
-
-	if (!tls1_channel_id_hash(&md_ctx, s))
-		goto err;
-
-	if (!EVP_DigestSignFinal(&md_ctx, NULL, &sig_len))
-		{
-		SSLerr(SSL_F_SSL3_SEND_CHANNEL_ID,SSL_R_EVP_DIGESTSIGNFINAL_FAILED);
-		goto err;
-		}
-
-	der_sig = OPENSSL_malloc(sig_len);
-	if (!der_sig)
-		{
-		SSLerr(SSL_F_SSL3_SEND_CHANNEL_ID,ERR_R_MALLOC_FAILURE);
-		goto err;
-		}
-
-	if (!EVP_DigestSignFinal(&md_ctx, der_sig, &sig_len))
-		{
-		SSLerr(SSL_F_SSL3_SEND_CHANNEL_ID,SSL_R_EVP_DIGESTSIGNFINAL_FAILED);
-		goto err;
-		}
-
-	derp = der_sig;
-	sig = d2i_ECDSA_SIG(NULL, (const unsigned char**)&derp, sig_len);
-	if (sig == NULL)
-		{
-		SSLerr(SSL_F_SSL3_SEND_CHANNEL_ID,SSL_R_D2I_ECDSA_SIG);
-		goto err;
-		}
-
-	// The first byte of public_key will be 0x4, denoting an uncompressed key.
-	memcpy(d, public_key + 1, 64);
-	d += 64;
-	memset(d, 0, 2 * 32);
-	BN_bn2bin(sig->r, d + 32 - BN_num_bytes(sig->r));
-	d += 32;
-	BN_bn2bin(sig->s, d + 32 - BN_num_bytes(sig->s));
-	d += 32;
-
-	s->state = SSL3_ST_CW_CHANNEL_ID_B;
-	s->init_num = 4 + 2 + 2 + TLSEXT_CHANNEL_ID_SIZE;
-	s->init_off = 0;
-
-	ret = ssl3_do_write(s, SSL3_RT_HANDSHAKE);
-
-err:
-	EVP_MD_CTX_cleanup(&md_ctx);
-	if (public_key)
-		OPENSSL_free(public_key);
-	if (der_sig)
-		OPENSSL_free(der_sig);
-	if (sig)
-		ECDSA_SIG_free(sig);
-
-	return ret;
-	}
-#endif  /* !OPENSSL_NO_TLSEXT */
+#endif  /* !OPENSSL_NO_TLSEXT && !OPENSSL_NO_NEXTPROTONEG */
 
 /* Check to see if handshake is full or resumed. Usually this is just a
  * case of checking to see if a cache hit has occurred. In the case of

@@ -1,6 +1,6 @@
 # Auto-generated - DO NOT EDIT!
 # To regenerate, edit openssl.config, then run:
-#     ./import_openssl.sh import /path/to/openssl-1.0.1h.tar.gz
+#     ./import_openssl.sh import /path/to/openssl-1.0.1m.tar.gz
 #
 openssl_cflags := \
   -DOPENSSL_THREADS \
@@ -8,7 +8,6 @@ openssl_cflags := \
   -DDSO_DLFCN \
   -DHAVE_DLFCN_H \
   -DL_ENDIAN \
-  -DTERMIO \
   -DOPENSSL_EXPERIMENTAL_JPAKE \
   -DOPENSSL_NO_CAMELLIA \
   -DOPENSSL_NO_CAPIENG \
@@ -31,5 +30,6 @@ openssl_cflags := \
   -DOPENSSL_NO_SHA0 \
   -DOPENSSL_NO_STATIC_ENGINE \
   -DOPENSSL_NO_STORE \
+  -DOPENSSL_NO_UNIT_TEST \
   -DOPENSSL_NO_WHIRLPOOL \
 

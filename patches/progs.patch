@@ -1,54 +1,54 @@
---- openssl-1.0.0.orig/apps/openssl.c	2009-10-04 09:43:21.000000000 -0700
-+++ openssl-1.0.0/apps/openssl.c	2010-05-18 14:05:14.000000000 -0700
-@@ -275,8 +275,10 @@ int main(int Argc, char *Argv[])
- 		if (ERR_GET_REASON(ERR_peek_last_error())
- 		    == CONF_R_NO_SUCH_FILE)
- 			{
+--- openssl-1.0.1m.orig/apps/openssl.c	2015-06-06 08:08:27.936971629 +0000
++++ openssl-1.0.1m/apps/openssl.c	2015-06-06 08:15:07.824959733 +0000
+@@ -337,7 +337,10 @@ int main(int Argc, char *ARGV[])
+     if (i == 0) {
+         if (ERR_GET_REASON(ERR_peek_last_error())
+             == CONF_R_NO_SUCH_FILE) {
 +#if 0 /* ANDROID */
- 			BIO_printf(bio_err,
- 				   "WARNING: can't open config file: %s\n",p);
+             BIO_printf(bio_err, "WARNING: can't open config file: %s\n", p);
 +#endif
- 			ERR_clear_error();
- 			NCONF_free(config);
- 			config = NULL;
---- openssl-1.0.0.orig/apps/progs.h	2009-06-30 08:08:38.000000000 -0700
-+++ openssl-1.0.0/apps/progs.h	2010-05-18 14:05:38.000000000 -0700
-@@ -146,7 +152,9 @@ FUNCTION functions[] = {
- 	{FUNC_TYPE_GENERAL,"ocsp",ocsp_main},
++
+             ERR_clear_error();
+             NCONF_free(config);
+             config = NULL;
+--- openssl-1.0.1m.orig/apps/progs.h	2015-06-06 08:08:27.936971629 +0000
++++ openssl-1.0.1m/apps/progs.h	2015-06-06 08:20:02.344950972 +0000
+@@ -147,7 +147,9 @@ FUNCTION functions[] = {
+     {FUNC_TYPE_GENERAL, "ocsp", ocsp_main},
  #endif
- 	{FUNC_TYPE_GENERAL,"prime",prime_main},
+     {FUNC_TYPE_GENERAL, "prime", prime_main},
 +#if 0 /* ANDROID */
- 	{FUNC_TYPE_GENERAL,"ts",ts_main},
+     {FUNC_TYPE_GENERAL, "ts", ts_main},
 +#endif
  #ifndef OPENSSL_NO_SRP
- 	{FUNC_TYPE_GENERAL,"srp",srp_main},
+     {FUNC_TYPE_GENERAL, "srp", srp_main},
  #endif
---- openssl-1.0.0.orig/apps/speed.c	2010-03-03 11:56:17.000000000 -0800
-+++ openssl-1.0.0/apps/speed.c	2010-05-18 14:05:57.000000000 -0700
-@@ -1718,6 +1718,7 @@ int MAIN(int argc, char **argv)
- 			}
- 		}
+--- openssl-1.0.1m.orig/apps/speed.c	2015-06-06 08:08:27.920971629 +0000
++++ openssl-1.0.1m/apps/speed.c	2015-06-06 08:17:20.508955786 +0000
+@@ -1760,6 +1760,7 @@ int MAIN(int argc, char **argv)
+         }
+     }
  
 +#if 0 /* ANDROID */
- 	if (doit[D_IGE_128_AES])
- 		{
- 		for (j=0; j<SIZE_NUM; j++)
-@@ -1763,6 +1764,7 @@ int MAIN(int argc, char **argv)
+     if (doit[D_IGE_128_AES]) {
+         for (j = 0; j < SIZE_NUM; j++) {
+             print_message(names[D_IGE_128_AES], c[D_IGE_128_AES][j],
+@@ -1815,6 +1816,7 @@ int MAIN(int argc, char **argv)
+         CRYPTO_gcm128_release(ctx);
+     }
+ # endif
++# endif
+ # ifndef OPENSSL_NO_CAMELLIA
+     if (doit[D_CBC_128_CML]) {
+         for (j = 0; j < SIZE_NUM; j++) {
+--- openssl-1.0.1m.orig/crypto/ui/ui_openssl.c	2015-06-06 08:08:28.132971623 +0000
++++ openssl-1.0.1m/crypto/ui/ui_openssl.c	2015-06-06 08:18:44.248953295 +0000
+@@ -195,7 +195,7 @@
+  * may eventually opt to remove it's use entirely.
+  */
  
+-#if !defined(TERMIOS) && !defined(TERMIO) && !defined(SGTTY)
++#if !defined(TERMIOS) && !defined(TERMIO) && !defined(SGTTY) && !defined(__ANDROID__)
  
- #endif
-+#endif
- #ifndef OPENSSL_NO_CAMELLIA
- 	if (doit[D_CBC_128_CML])
- 		{
---- openssl-1.0.0.orig/crypto/ui/ui_openssl.c	2009-10-04 09:43:21.000000000 -0700
-+++ openssl-1.0.0/crypto/ui/ui_openssl.c	2010-05-18 13:36:26.000000000 -0700
-@@ -184,7 +184,7 @@
- # undef  SGTTY
- #endif
- 
--#if defined(linux) && !defined(TERMIO)
-+#if defined(linux) && !defined(TERMIO) && !defined(__ANDROID__)
- # undef  TERMIOS
- # define TERMIO
- # undef  SGTTY
+ # if defined(_LIBC)
+ #  undef  TERMIOS

@@ -160,7 +160,10 @@ int SSL_use_RSAPrivateKey(SSL *ssl, RSA *rsa)
     }
 
     RSA_up_ref(rsa);
-    EVP_PKEY_assign_RSA(pkey, rsa);
+    if (EVP_PKEY_assign_RSA(pkey, rsa) <= 0) {
+        RSA_free(rsa);
+        return 0;
+    }
 
     ret = ssl_set_pkey(ssl->cert, pkey);
     EVP_PKEY_free(pkey);
@@ -181,6 +184,15 @@ static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey)
     if (c->pkeys[i].x509 != NULL) {
         EVP_PKEY *pktmp;
         pktmp = X509_get_pubkey(c->pkeys[i].x509);
+        if (pktmp == NULL) {
+            SSLerr(SSL_F_SSL_SET_PKEY, ERR_R_MALLOC_FAILURE);
+            EVP_PKEY_free(pktmp);
+            return 0;
+        }
+        /*
+         * The return code from EVP_PKEY_copy_parameters is deliberately
+         * ignored. Some EVP_PKEY types cannot do this.
+         */
         EVP_PKEY_copy_parameters(pktmp, pkey);
         EVP_PKEY_free(pktmp);
         ERR_clear_error();
@@ -382,6 +394,10 @@ static int ssl_set_cert(CERT *c, X509 *x)
     }
 
     if (c->pkeys[i].privatekey != NULL) {
+        /*
+         * The return code from EVP_PKEY_copy_parameters is deliberately
+         * ignored. Some EVP_PKEY types cannot do this.
+         */
         EVP_PKEY_copy_parameters(pkey, c->pkeys[i].privatekey);
         ERR_clear_error();
 
@@ -502,7 +518,10 @@ int SSL_CTX_use_RSAPrivateKey(SSL_CTX *ctx, RSA *rsa)
     }
 
     RSA_up_ref(rsa);
-    EVP_PKEY_assign_RSA(pkey, rsa);
+    if (EVP_PKEY_assign_RSA(pkey, rsa) <= 0) {
+        RSA_free(rsa);
+        return 0;
+    }
 
     ret = ssl_set_pkey(ctx->cert, pkey);
     EVP_PKEY_free(pkey);
@@ -642,42 +661,6 @@ int SSL_CTX_use_PrivateKey_ASN1(int type, SSL_CTX *ctx,
     EVP_PKEY_free(pkey);
     return (ret);
 }
-
-int SSL_use_certificate_chain(SSL *ssl, STACK_OF(X509) *cert_chain)
-	{
-	if (ssl == NULL)
-		{
-		SSLerr(SSL_F_SSL_USE_CERTIFICATE_CHAIN,ERR_R_PASSED_NULL_PARAMETER);
-		return(0);
-		}
-	if (ssl->cert == NULL)
-		{
-		SSLerr(SSL_F_SSL_USE_CERTIFICATE_CHAIN,SSL_R_NO_CERTIFICATE_ASSIGNED);
-		return(0);
-		}
-	if (ssl->cert->key == NULL)
-		{
-		SSLerr(SSL_F_SSL_USE_CERTIFICATE_CHAIN,SSL_R_NO_CERTIFICATE_ASSIGNED);
-		return(0);
-		}
-	ssl->cert->key->cert_chain = cert_chain;
-	return(1);
-	}
-
-STACK_OF(X509) *SSL_get_certificate_chain(SSL *ssl, X509 *x)
-	{
-	int i;
-	if (x == NULL)
-		return NULL;
-	if (ssl == NULL)
-		return NULL;
-	if (ssl->cert == NULL)
-		return NULL;
-	for (i = 0; i < SSL_PKEY_NUM; i++)
-		if (ssl->cert->pkeys[i].x509 == x)
-			return ssl->cert->pkeys[i].cert_chain;
-	return NULL;
-	}
 
 #ifndef OPENSSL_NO_STDIO
 /*

@@ -307,6 +307,7 @@ SSL *SSL_new(SSL_CTX *ctx)
     s->options = ctx->options;
     s->mode = ctx->mode;
     s->max_cert_list = ctx->max_cert_list;
+    s->references = 1;
 
     if (ctx->cert != NULL) {
         /*
@@ -336,7 +337,6 @@ SSL *SSL_new(SSL_CTX *ctx)
     OPENSSL_assert(s->sid_ctx_length <= sizeof s->sid_ctx);
     memcpy(&s->sid_ctx, &ctx->sid_ctx, sizeof(s->sid_ctx));
     s->verify_callback = ctx->default_verify_callback;
-	s->session_creation_enabled = 1;
     s->generate_session_id = ctx->generate_session_id;
 
     s->param = X509_VERIFY_PARAM_new();
@@ -376,7 +376,6 @@ SSL *SSL_new(SSL_CTX *ctx)
     if (!s->method->ssl_new(s))
         goto err;
 
-    s->references = 1;
     s->server = (ctx->method->ssl_accept == ssl_undefined_function) ? 0 : 1;
 
     SSL_clear(s);
@@ -1315,32 +1314,6 @@ int SSL_set_cipher_list(SSL *s, const char *str)
     return 1;
 }
 
-/** specify the ciphers to be used by the SSL */
-int SSL_set_cipher_lists(SSL *s,STACK_OF(SSL_CIPHER) *sk)
-	{
-	STACK_OF(SSL_CIPHER) *tmp_cipher_list;
-
-	if (sk == NULL)
-		return 0;
-
-        /* Based on end of ssl_create_cipher_list */
-	tmp_cipher_list = sk_SSL_CIPHER_dup(sk);
-	if (tmp_cipher_list == NULL)
-		{
-		return 0;
-		}
-	if (s->cipher_list != NULL)
-		sk_SSL_CIPHER_free(s->cipher_list);
-	s->cipher_list = sk;
-	if (s->cipher_list_by_id != NULL)
-		sk_SSL_CIPHER_free(s->cipher_list_by_id);
-	s->cipher_list_by_id = tmp_cipher_list;
-	(void)sk_SSL_CIPHER_set_cmp_func(s->cipher_list_by_id,ssl_cipher_ptr_id_cmp);
-
-	sk_SSL_CIPHER_sort(s->cipher_list_by_id);
-	return 1;
-	}
-
 /* works well for SSLv2, not so good for SSLv3 */
 char *SSL_get_shared_ciphers(const SSL *s, char *buf, int len)
 {
@@ -1467,9 +1440,13 @@ STACK_OF(SSL_CIPHER) *ssl_bytes_to_cipher_list(SSL *s, unsigned char *p,
                SSL_R_ERROR_IN_RECEIVED_CIPHER_LIST);
         return (NULL);
     }
-    if ((skp == NULL) || (*skp == NULL))
+    if ((skp == NULL) || (*skp == NULL)) {
         sk = sk_SSL_CIPHER_new_null(); /* change perhaps later */
-    else {
+        if(sk == NULL) {
+            SSLerr(SSL_F_SSL_BYTES_TO_CIPHER_LIST, ERR_R_MALLOC_FAILURE);
+            return NULL;
+        }
+    } else {
         sk = *skp;
         sk_SSL_CIPHER_zero(sk);
     }
@@ -1918,6 +1895,13 @@ SSL_CTX *SSL_CTX_new(const SSL_METHOD *meth)
      * deployed might change this.
      */
     ret->options |= SSL_OP_LEGACY_SERVER_CONNECT;
+
+    /*
+     * Disable SSLv2 by default, callers that want to enable SSLv2 will have to
+     * explicitly clear this option via either of SSL_CTX_clear_options() or
+     * SSL_clear_options().
+     */
+    ret->options |= SSL_OP_NO_SSLv2;
 
     return (ret);
  err:
@@ -2645,42 +2629,20 @@ SSL_METHOD *ssl_bad_method(int ver)
     return (NULL);
 }
 
-static const char *ssl_get_version(int version)
-{
-	if (version == TLS1_2_VERSION)
-		return("TLSv1.2");
-	else if (version == TLS1_1_VERSION)
-		return("TLSv1.1");
-	else if (version == TLS1_VERSION)
-		return("TLSv1");
-	else if (version == SSL3_VERSION)
-		return("SSLv3");
-	else if (version == SSL2_VERSION)
-		return("SSLv2");
-	else
-		return("unknown");
-}
-
 const char *SSL_get_version(const SSL *s)
 {
-	return ssl_get_version(s->version);
-}
-
-const char *SSL_SESSION_get_version(const SSL_SESSION *s)
-{
-	return ssl_get_version(s->ssl_version);
-}
-
-const char* SSL_authentication_method(const SSL* ssl)
-{
-	if (ssl->cert != NULL && ssl->cert->rsa_tmp != NULL)
-		return SSL_TXT_RSA "_" SSL_TXT_EXPORT;
-	switch (ssl->version) {
-	case SSL2_VERSION:
-		return SSL_TXT_RSA;
-	default:
-		return SSL_CIPHER_authentication_method(ssl->s3->tmp.new_cipher);
-	}
+    if (s->version == TLS1_2_VERSION)
+        return ("TLSv1.2");
+    else if (s->version == TLS1_1_VERSION)
+        return ("TLSv1.1");
+    else if (s->version == TLS1_VERSION)
+        return ("TLSv1");
+    else if (s->version == SSL3_VERSION)
+        return ("SSLv3");
+    else if (s->version == SSL2_VERSION)
+        return ("SSLv2");
+    else
+        return ("unknown");
 }
 
 SSL *SSL_dup(SSL *s)
@@ -3328,8 +3290,11 @@ EVP_MD_CTX *ssl_replace_hash(EVP_MD_CTX **hash, const EVP_MD *md)
 {
     ssl_clear_hash_ctx(hash);
     *hash = EVP_MD_CTX_create();
-    if (md)
-        EVP_DigestInit_ex(*hash, md, NULL);
+    if (*hash == NULL || (md && EVP_DigestInit_ex(*hash, md, NULL) <= 0)) {
+        EVP_MD_CTX_destroy(*hash);
+        *hash = NULL;
+        return NULL;
+    }
     return *hash;
 }
 

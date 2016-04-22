@@ -119,9 +119,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if !defined(OPENSSL_SYSNAME_WIN32) && !defined(NETWARE_CLIB)
-# include <strings.h>
-#endif
 #include <sys/types.h>
 #include <ctype.h>
 #include <errno.h>
@@ -572,7 +569,7 @@ int password_callback(char *buf, int bufsiz, int verify, PW_CB_DATA *cb_tmp)
         char *prompt = NULL;
 
         prompt = UI_construct_prompt(ui, "pass phrase", prompt_info);
-        if(!prompt) {
+        if (!prompt) {
             BIO_printf(bio_err, "Out of memory\n");
             UI_free(ui);
             return 0;
@@ -586,7 +583,7 @@ int password_callback(char *buf, int bufsiz, int verify, PW_CB_DATA *cb_tmp)
                                      PW_MIN_LENGTH, bufsiz - 1);
         if (ok >= 0 && verify) {
             buff = (char *)OPENSSL_malloc(bufsiz);
-            if(!buff) {
+            if (!buff) {
                 BIO_printf(bio_err, "Out of memory\n");
                 UI_free(ui);
                 OPENSSL_free(prompt);
@@ -1247,7 +1244,11 @@ int set_name_ex(unsigned long *flags, const char *arg)
         {"ca_default", XN_FLAG_MULTILINE, 0xffffffffL},
         {NULL, 0, 0}
     };
-    return set_multi_opts(flags, arg, ex_tbl);
+    if (set_multi_opts(flags, arg, ex_tbl) == 0)
+        return 0;
+    if ((*flags & XN_FLAG_SEP_MASK) == 0)
+        *flags |= XN_FLAG_SEP_CPLUS_SPC;
+    return 1;
 }
 
 int set_ext_copy(int *copy_type, const char *arg)
@@ -2238,6 +2239,8 @@ int args_verify(char ***pargs, int *pargc,
         flags |= X509_V_FLAG_NOTIFY_POLICY;
     else if (!strcmp(arg, "-check_ss_sig"))
         flags |= X509_V_FLAG_CHECK_SS_SIGNATURE;
+    else if (!strcmp(arg, "-no_alt_chains"))
+        flags |= X509_V_FLAG_NO_ALT_CHAINS;
     else
         return 0;
 

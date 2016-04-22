@@ -502,7 +502,6 @@
 
 typedef struct cert_pkey_st {
     X509 *x509;
-	STACK_OF(X509) *cert_chain;
     EVP_PKEY *privatekey;
     /* Digest to use when signing */
     const EVP_MD *digest;
@@ -866,6 +865,7 @@ int ssl_set_peer_cert_type(SESS_CERT *c, int type);
 int ssl_get_new_session(SSL *s, int session);
 int ssl_get_prev_session(SSL *s, unsigned char *session, int len,
                          const unsigned char *limit);
+SSL_SESSION *ssl_session_dup(SSL_SESSION *src, int ticket);
 int ssl_cipher_id_cmp(const SSL_CIPHER *a, const SSL_CIPHER *b);
 DECLARE_OBJ_BSEARCH_GLOBAL_CMP_FN(SSL_CIPHER, SSL_CIPHER, ssl_cipher_id);
 int ssl_cipher_ptr_id_cmp(const SSL_CIPHER *const *ap,
@@ -1154,7 +1154,7 @@ unsigned char *ssl_add_clienthello_tlsext(SSL *s, unsigned char *buf,
 unsigned char *ssl_add_serverhello_tlsext(SSL *s, unsigned char *buf,
                                           unsigned char *limit);
 int ssl_parse_clienthello_tlsext(SSL *s, unsigned char **data,
-                                 unsigned char *d, int n, int *al);
+                                 unsigned char *limit, int *al);
 int ssl_parse_serverhello_tlsext(SSL *s, unsigned char **data,
                                  unsigned char *d, int n, int *al);
 int ssl_prepare_clienthello_tlsext(SSL *s);
@@ -1218,15 +1218,15 @@ int tls1_cbc_remove_padding(const SSL *s,
                             SSL3_RECORD *rec,
                             unsigned block_size, unsigned mac_size);
 char ssl3_cbc_record_digest_supported(const EVP_MD_CTX *ctx);
-void ssl3_cbc_digest_record(const EVP_MD_CTX *ctx,
-                            unsigned char *md_out,
-                            size_t *md_out_size,
-                            const unsigned char header[13],
-                            const unsigned char *data,
-                            size_t data_plus_mac_size,
-                            size_t data_plus_mac_plus_padding_size,
-                            const unsigned char *mac_secret,
-                            unsigned mac_secret_length, char is_sslv3);
+int ssl3_cbc_digest_record(const EVP_MD_CTX *ctx,
+                           unsigned char *md_out,
+                           size_t *md_out_size,
+                           const unsigned char header[13],
+                           const unsigned char *data,
+                           size_t data_plus_mac_size,
+                           size_t data_plus_mac_plus_padding_size,
+                           const unsigned char *mac_secret,
+                           unsigned mac_secret_length, char is_sslv3);
 
 void tls_fips_digest_extra(const EVP_CIPHER_CTX *cipher_ctx,
                            EVP_MD_CTX *mac_ctx, const unsigned char *data,

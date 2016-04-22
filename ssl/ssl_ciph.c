@@ -356,10 +356,11 @@ static int get_optional_pkey_id(const char *pkey_name)
     const EVP_PKEY_ASN1_METHOD *ameth;
     int pkey_id = 0;
     ameth = EVP_PKEY_asn1_find_str(NULL, pkey_name, -1);
-    if (ameth) {
-        EVP_PKEY_asn1_get0_info(&pkey_id, NULL, NULL, NULL, NULL, ameth);
+    if (ameth && EVP_PKEY_asn1_get0_info(&pkey_id, NULL, NULL, NULL, NULL,
+                                         ameth) > 0) {
+        return pkey_id;
     }
-    return pkey_id;
+    return 0;
 }
 
 #else
@@ -371,7 +372,9 @@ static int get_optional_pkey_id(const char *pkey_name)
     int pkey_id = 0;
     ameth = EVP_PKEY_asn1_find_str(&tmpeng, pkey_name, -1);
     if (ameth) {
-        EVP_PKEY_asn1_get0_info(&pkey_id, NULL, NULL, NULL, NULL, ameth);
+        if (EVP_PKEY_asn1_get0_info(&pkey_id, NULL, NULL, NULL, NULL,
+                                    ameth) <= 0)
+            pkey_id = 0;
     }
     if (tmpeng)
         ENGINE_finish(tmpeng);
@@ -1815,52 +1818,6 @@ unsigned long SSL_CIPHER_get_id(const SSL_CIPHER *c)
 {
     return c->id;
 }
-
-/* return string version of key exchange algorithm */
-const char* SSL_CIPHER_authentication_method(const SSL_CIPHER* cipher)
-	{
-	switch (cipher->algorithm_mkey)
-		{
-	case SSL_kRSA:
-		return SSL_TXT_RSA;
-	case SSL_kDHr:
-		return SSL_TXT_DH "_" SSL_TXT_RSA;
-	case SSL_kDHd:
-		return SSL_TXT_DH "_" SSL_TXT_DSS;
-	case SSL_kEDH:
-		switch (cipher->algorithm_auth)
-			{
-		case SSL_aDSS:
-			return "DHE_" SSL_TXT_DSS;
-		case SSL_aRSA:
-			return "DHE_" SSL_TXT_RSA;
-		case SSL_aNULL:
-			return SSL_TXT_DH "_anon";
-		default:
-			return "UNKNOWN";
-                        }
-	case SSL_kKRB5:
-		return SSL_TXT_KRB5;
-	case SSL_kECDHr:
-		return SSL_TXT_ECDH "_" SSL_TXT_RSA;
-	case SSL_kECDHe:
-		return SSL_TXT_ECDH "_" SSL_TXT_ECDSA;
-	case SSL_kEECDH:
-		switch (cipher->algorithm_auth)
-			{
-		case SSL_aECDSA:
-			return "ECDHE_" SSL_TXT_ECDSA;
-		case SSL_aRSA:
-			return "ECDHE_" SSL_TXT_RSA;
-		case SSL_aNULL:
-			return SSL_TXT_ECDH "_anon";
-		default:
-			return "UNKNOWN";
-                        }
-        default:
-		return "UNKNOWN";
-		}
-	}
 
 SSL_COMP *ssl3_comp_find(STACK_OF(SSL_COMP) *sk, int n)
 {

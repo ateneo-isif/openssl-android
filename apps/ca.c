@@ -99,25 +99,19 @@
 #undef PROG
 #define PROG ca_main
 
-#define BASE_SECTION    "ca"
-#define CONFIG_FILE "openssl.cnf"
+#define BASE_SECTION            "ca"
+#define CONFIG_FILE             "openssl.cnf"
 
 #define ENV_DEFAULT_CA          "default_ca"
 
-#define STRING_MASK     "string_mask"
+#define STRING_MASK             "string_mask"
 #define UTF8_IN                 "utf8"
 
-#define ENV_DIR                 "dir"
-#define ENV_CERTS               "certs"
-#define ENV_CRL_DIR             "crl_dir"
-#define ENV_CA_DB               "CA_DB"
 #define ENV_NEW_CERTS_DIR       "new_certs_dir"
 #define ENV_CERTIFICATE         "certificate"
 #define ENV_SERIAL              "serial"
 #define ENV_CRLNUMBER           "crlnumber"
-#define ENV_CRL                 "crl"
 #define ENV_PRIVATE_KEY         "private_key"
-#define ENV_RANDFILE            "RANDFILE"
 #define ENV_DEFAULT_DAYS        "default_days"
 #define ENV_DEFAULT_STARTDATE   "default_startdate"
 #define ENV_DEFAULT_ENDDATE     "default_enddate"
@@ -558,7 +552,7 @@ int MAIN(int argc, char **argv)
 #ifdef OPENSSL_SYS_VMS
         len = strlen(s) + sizeof(CONFIG_FILE);
         tofree = OPENSSL_malloc(len);
-        if(!tofree) {
+        if (!tofree) {
             BIO_printf(bio_err, "Out of memory\n");
             goto err;
         }
@@ -566,7 +560,7 @@ int MAIN(int argc, char **argv)
 #else
         len = strlen(s) + sizeof(CONFIG_FILE) + 1;
         tofree = OPENSSL_malloc(len);
-        if(!tofree) {
+        if (!tofree) {
             BIO_printf(bio_err, "Out of memory\n");
             goto err;
         }
@@ -2520,6 +2514,8 @@ static int do_updatedb(CA_DB *db)
     char **rrow, *a_tm_s;
 
     a_tm = ASN1_UTCTIME_new();
+    if (a_tm == NULL)
+        return -1;
 
     /* get actual time and make a string */
     a_tm = X509_gmtime_adj(a_tm, 0);
@@ -2803,7 +2799,7 @@ int unpack_revinfo(ASN1_TIME **prevtm, int *preason, ASN1_OBJECT **phold,
     ASN1_GENERALIZEDTIME *comp_time = NULL;
     tmp = BUF_strdup(str);
 
-    if(!tmp) {
+    if (!tmp) {
         BIO_printf(bio_err, "memory allocation failure\n");
         goto err;
     }
@@ -2825,7 +2821,7 @@ int unpack_revinfo(ASN1_TIME **prevtm, int *preason, ASN1_OBJECT **phold,
 
     if (prevtm) {
         *prevtm = ASN1_UTCTIME_new();
-        if(!*prevtm) {
+        if (!*prevtm) {
             BIO_printf(bio_err, "memory allocation failure\n");
             goto err;
         }
@@ -2869,7 +2865,7 @@ int unpack_revinfo(ASN1_TIME **prevtm, int *preason, ASN1_OBJECT **phold,
                 goto err;
             }
             comp_time = ASN1_GENERALIZEDTIME_new();
-            if(!comp_time) {
+            if (!comp_time) {
                 BIO_printf(bio_err, "memory allocation failure\n");
                 goto err;
             }

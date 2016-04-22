@@ -576,7 +576,7 @@ int BN_GF2m_mod_sqr_arr(BIGNUM *r, const BIGNUM *a, const int p[],
     bn_check_top(a);
     BN_CTX_start(ctx);
     if ((s = BN_CTX_get(ctx)) == NULL)
-        return 0;
+        goto err;
     if (!bn_wexpand(s, 2 * a->top))
         goto err;
 
@@ -694,23 +694,27 @@ int BN_GF2m_mod_inv(BIGNUM *r, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
     }
 # else
     {
-        int i, ubits = BN_num_bits(u), vbits = BN_num_bits(v), /* v is copy
-                                                                * of p */
-            top = p->top;
+        int i;
+        int ubits = BN_num_bits(u);
+        int vbits = BN_num_bits(v); /* v is copy of p */
+        int top = p->top;
         BN_ULONG *udp, *bdp, *vdp, *cdp;
 
-        bn_wexpand(u, top);
+        if (!bn_wexpand(u, top))
+            goto err;
         udp = u->d;
         for (i = u->top; i < top; i++)
             udp[i] = 0;
         u->top = top;
-        bn_wexpand(b, top);
+        if (!bn_wexpand(b, top))
+          goto err;
         bdp = b->d;
         bdp[0] = 1;
         for (i = 1; i < top; i++)
             bdp[i] = 0;
         b->top = top;
-        bn_wexpand(c, top);
+        if (!bn_wexpand(c, top))
+          goto err;
         cdp = c->d;
         for (i = 0; i < top; i++)
             cdp[i] = 0;
@@ -740,8 +744,12 @@ int BN_GF2m_mod_inv(BIGNUM *r, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
                 ubits--;
             }
 
-            if (ubits <= BN_BITS2 && udp[0] == 1)
-                break;
+            if (ubits <= BN_BITS2) {
+                if (udp[0] == 0) /* poly was reducible */
+                    goto err;
+                if (udp[0] == 1)
+                    break;
+            }
 
             if (ubits < vbits) {
                 i = ubits;

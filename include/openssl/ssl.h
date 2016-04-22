@@ -602,7 +602,7 @@ struct ssl_session_st {
 # define SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION        0x00040000L
 /* If set, always create a new key when using tmp_ecdh parameters */
 # define SSL_OP_SINGLE_ECDH_USE                          0x00080000L
-/* If set, always create a new key when using tmp_dh parameters */
+/* Does nothing: retained for compatibility */
 # define SSL_OP_SINGLE_DH_USE                            0x00100000L
 /* Does nothing: retained for compatibiity */
 # define SSL_OP_EPHEMERAL_RSA                            0x0
@@ -1362,8 +1362,6 @@ struct ssl_st {
     unsigned char sid_ctx[SSL_MAX_SID_CTX_LENGTH];
     /* This can also be in the session once a session is established */
     SSL_SESSION *session;
-    /* This can be disabled to prevent the use of uncached sessions */
-	int session_creation_enabled;
     /* Default generate session ID callback. */
     GEN_SESSION_CB generate_session_id;
     /* Used in SSL2 and SSL3 */
@@ -1546,6 +1544,7 @@ extern "C" {
 # define SSL_ST_BEFORE                   0x4000
 # define SSL_ST_OK                       0x03
 # define SSL_ST_RENEGOTIATE              (0x04|SSL_ST_INIT)
+# define SSL_ST_ERR                      0x05
 
 # define SSL_CB_LOOP                     0x01
 # define SSL_CB_EXIT                     0x02
@@ -1842,7 +1841,6 @@ const char *SSL_get_cipher_list(const SSL *s, int n);
 char *SSL_get_shared_ciphers(const SSL *s, char *buf, int len);
 int SSL_get_read_ahead(const SSL *s);
 int SSL_pending(const SSL *s);
-const char *SSL_authentication_method(const SSL *c);
 # ifndef OPENSSL_NO_SOCK
 int SSL_set_fd(SSL *s, int fd);
 int SSL_set_rfd(SSL *s, int fd);
@@ -1854,7 +1852,6 @@ BIO *SSL_get_rbio(const SSL *s);
 BIO *SSL_get_wbio(const SSL *s);
 # endif
 int SSL_set_cipher_list(SSL *s, const char *str);
-int SSL_set_cipher_lists(SSL *s, STACK_OF(SSL_CIPHER) *sk);
 void SSL_set_read_ahead(SSL *s, int yes);
 int SSL_get_verify_mode(const SSL *s);
 int SSL_get_verify_depth(const SSL *s);
@@ -1871,8 +1868,6 @@ int SSL_use_PrivateKey_ASN1(int pk, SSL *ssl, const unsigned char *d,
                             long len);
 int SSL_use_certificate(SSL *ssl, X509 *x);
 int SSL_use_certificate_ASN1(SSL *ssl, const unsigned char *d, int len);
-int SSL_use_certificate_chain(SSL *ssl, STACK_OF(X509) *cert_chain);
-STACK_OF(X509) *SSL_get_certificate_chain(SSL *ssl, X509 *x);
 
 # ifndef OPENSSL_NO_STDIO
 int SSL_use_RSAPrivateKey_file(SSL *ssl, const char *file, int type);
@@ -1913,7 +1908,6 @@ int SSL_SESSION_set1_id_context(SSL_SESSION *s, const unsigned char *sid_ctx,
 SSL_SESSION *SSL_SESSION_new(void);
 const unsigned char *SSL_SESSION_get_id(const SSL_SESSION *s,
                                         unsigned int *len);
-const char *SSL_SESSION_get_version(const SSL_SESSION *s);
 unsigned int SSL_SESSION_get_compress_id(const SSL_SESSION *s);
 # ifndef OPENSSL_NO_FP_API
 int SSL_SESSION_print_fp(FILE *fp, const SSL_SESSION *ses);
@@ -1924,7 +1918,6 @@ int SSL_SESSION_print(BIO *fp, const SSL_SESSION *ses);
 void SSL_SESSION_free(SSL_SESSION *ses);
 int i2d_SSL_SESSION(SSL_SESSION *in, unsigned char **pp);
 int SSL_set_session(SSL *to, SSL_SESSION *session);
-void SSL_set_session_creation_enabled(SSL *, int);
 int SSL_CTX_add_session(SSL_CTX *s, SSL_SESSION *c);
 int SSL_CTX_remove_session(SSL_CTX *, SSL_SESSION *c);
 int SSL_CTX_set_generate_session_id(SSL_CTX *, GEN_SESSION_CB);
@@ -2311,6 +2304,7 @@ void ERR_load_SSL_strings(void);
 # define SSL_F_SSL3_CHANGE_CIPHER_STATE                   129
 # define SSL_F_SSL3_CHECK_CERT_AND_ALGORITHM              130
 # define SSL_F_SSL3_CHECK_CLIENT_HELLO                    304
+# define SSL_F_SSL3_CHECK_FINISHED                        339
 # define SSL_F_SSL3_CLIENT_HELLO                          131
 # define SSL_F_SSL3_CONNECT                               132
 # define SSL_F_SSL3_CTRL                                  213
@@ -2319,6 +2313,7 @@ void ERR_load_SSL_strings(void);
 # define SSL_F_SSL3_DO_CHANGE_CIPHER_SPEC                 292
 # define SSL_F_SSL3_ENC                                   134
 # define SSL_F_SSL3_GENERATE_KEY_BLOCK                    238
+# define SSL_F_SSL3_GENERATE_MASTER_SECRET                388
 # define SSL_F_SSL3_GET_CERTIFICATE_REQUEST               135
 # define SSL_F_SSL3_GET_CERT_STATUS                       289
 # define SSL_F_SSL3_GET_CERT_VERIFY                       136
@@ -2416,6 +2411,7 @@ void ERR_load_SSL_strings(void);
 # define SSL_F_SSL_READ                                   223
 # define SSL_F_SSL_RSA_PRIVATE_DECRYPT                    187
 # define SSL_F_SSL_RSA_PUBLIC_ENCRYPT                     188
+# define SSL_F_SSL_SESSION_DUP                            348
 # define SSL_F_SSL_SESSION_NEW                            189
 # define SSL_F_SSL_SESSION_PRINT_FP                       190
 # define SSL_F_SSL_SESSION_SET1_ID_CONTEXT                312
@@ -2438,7 +2434,6 @@ void ERR_load_SSL_strings(void);
 # define SSL_F_SSL_UNDEFINED_VOID_FUNCTION                244
 # define SSL_F_SSL_USE_CERTIFICATE                        198
 # define SSL_F_SSL_USE_CERTIFICATE_ASN1                   199
-# define SSL_F_SSL_USE_CERTIFICATE_CHAIN                 2000
 # define SSL_F_SSL_USE_CERTIFICATE_FILE                   200
 # define SSL_F_SSL_USE_PRIVATEKEY                         201
 # define SSL_F_SSL_USE_PRIVATEKEY_ASN1                    202
@@ -2471,8 +2466,11 @@ void ERR_load_SSL_strings(void);
 # define SSL_R_BAD_DATA_RETURNED_BY_CALLBACK              106
 # define SSL_R_BAD_DECOMPRESSION                          107
 # define SSL_R_BAD_DH_G_LENGTH                            108
+# define SSL_R_BAD_DH_G_VALUE                             375
 # define SSL_R_BAD_DH_PUB_KEY_LENGTH                      109
+# define SSL_R_BAD_DH_PUB_KEY_VALUE                       393
 # define SSL_R_BAD_DH_P_LENGTH                            110
+# define SSL_R_BAD_DH_P_VALUE                             395
 # define SSL_R_BAD_DIGEST_LENGTH                          111
 # define SSL_R_BAD_DSA_SIGNATURE                          112
 # define SSL_R_BAD_ECC_CERT                               304
@@ -2531,6 +2529,7 @@ void ERR_load_SSL_strings(void);
 # define SSL_R_DATA_LENGTH_TOO_LONG                       146
 # define SSL_R_DECRYPTION_FAILED                          147
 # define SSL_R_DECRYPTION_FAILED_OR_BAD_RECORD_MAC        281
+# define SSL_R_DH_KEY_TOO_SMALL                           372
 # define SSL_R_DH_PUBLIC_VALUE_LENGTH_IS_WRONG            148
 # define SSL_R_DIGEST_CHECK_FAILED                        149
 # define SSL_R_DTLS_MESSAGE_TOO_BIG                       334
@@ -2661,7 +2660,6 @@ void ERR_load_SSL_strings(void);
 # define SSL_R_SCSV_RECEIVED_WHEN_RENEGOTIATING           345
 # define SSL_R_SERVERHELLO_TLSEXT                         275
 # define SSL_R_SESSION_ID_CONTEXT_UNINITIALIZED           277
-# define SSL_R_SESSION_MAY_NOT_BE_CREATED                2000
 # define SSL_R_SHORT_READ                                 219
 # define SSL_R_SIGNATURE_ALGORITHMS_ERROR                 360
 # define SSL_R_SIGNATURE_FOR_NON_SIGNING_CERTIFICATE      220
